@@ -4,7 +4,7 @@ import logoSemarang from "@/assets/logo-semarang.png";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "https://chatbot-backend-production-dab0.up.railway.app";
 
-async function fetchBotReply(message: string): Promise<string> {
+async function fetchBotReply(message: string): Promise<{ reply: string; options?: string[] }> {
   const response = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -12,7 +12,10 @@ async function fetchBotReply(message: string): Promise<string> {
   });
   if (!response.ok) throw new Error(`Server error: ${response.status}`);
   const data = await response.json();
-  return data.reply ?? "Maaf, terjadi kesalahan pada server.";
+  return {
+    reply: data.reply ?? "Maaf, terjadi kesalahan pada server.",
+    options: data.options ?? undefined,
+  };
 }
 
 function localFallback(userText: string): string {
@@ -35,6 +38,7 @@ interface Message {
   time: string;
   status?: "sent" | "delivered" | "read";
   isError?: boolean;
+  options?: string[];
 }
  const getTime = () =>
     new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
@@ -201,7 +205,18 @@ function TypingIndicator() {
   );
 }
 
-function ChatBubble({ message }: { message: Message }) {
+// ============================================================
+// CHAT BUBBLE (kini mendukung tombol pilihan / options)
+// ============================================================
+function ChatBubble({
+  message,
+  onSelectOption,
+  disabled,
+}: {
+  message: Message;
+  onSelectOption: (text: string) => void;
+  disabled: boolean;
+}) {
   const isBot = message.from === "bot";
 
   if (isBot) {
@@ -218,6 +233,28 @@ function ChatBubble({ message }: { message: Message }) {
             }}
             dangerouslySetInnerHTML={{ __html: message.text }}
           />
+
+          {/* Tombol pilihan klarifikasi (jika ada) */}
+          {message.options && message.options.length > 0 && (
+            <div className="flex flex-col gap-1.5 mt-1.5">
+              {message.options.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => onSelectOption(opt)}
+                  disabled={disabled}
+                  className="text-left text-[0.8rem] px-3 py-2 rounded-xl font-medium border transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                  style={{
+                    borderColor: "rgba(185,28,28,0.3)",
+                    color: "#b91c1c",
+                    background: "rgba(185,28,28,0.06)",
+                  }}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-center gap-1 px-1">
             <span className="text-[0.7rem] text-red-300">{message.time}</span>
           </div>
@@ -320,9 +357,18 @@ export default function App() {
     resetTimer(); // reset timer setiap ada pesan baru
 
     try {
-      const replyText = await fetchBotReply(trimmed);
+      const replyData = await fetchBotReply(trimmed);
       setIsOnline(true);
-      setMessages((prev) => [...prev, { id: Date.now() + 1, from: "bot", text: replyText, time: getTime() }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          from: "bot",
+          text: replyData.reply,
+          time: getTime(),
+          options: replyData.options,
+        },
+      ]);
     } catch (err) {
       console.warn("Backend tidak tersedia, menggunakan fallback lokal.", err);
       setIsOnline(false);
@@ -330,6 +376,11 @@ export default function App() {
     } finally {
       setTyping(false);
     }
+  };
+
+  // Saat user mengklik salah satu tombol pilihan (options)
+  const handleSelectOption = (optionText: string) => {
+    sendMessage(optionText);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -411,7 +462,9 @@ export default function App() {
 
         {/* Chat area */}
         <div ref={chatRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-3 flex flex-col gap-3" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23b91c1c' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` }}>
-          {messages.map((msg) => <ChatBubble key={msg.id} message={msg} />)}
+          {messages.map((msg) => (
+            <ChatBubble key={msg.id} message={msg} onSelectOption={handleSelectOption} disabled={typing} />
+          ))}
           {typing && <TypingIndicator />}
           <div ref={bottomRef} />
         </div>
